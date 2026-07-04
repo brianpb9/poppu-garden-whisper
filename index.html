@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8C%B8%3C/text%3E%3C/svg%3E">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#bfe3d8">
 <title>Poppu Garden Whisper</title>
@@ -136,18 +138,32 @@ const Save = {
   key: 'poppu_garden_v1',
   data: null,
   load(){
-    try { this.data = JSON.parse(localStorage.getItem(this.key)); } catch(e){ this.data=null; }
-    if(!this.data){
-      this.data = {
-        bloomedTotal: 0, stickers: 0, discoveredFlowers: [],
-        lastPlayDay: null, streak: 0, unlocked: { backyard:true, forest:false, ocean:false },
-        goldenFound: 0,
-      };
+    const defaults = {
+      bloomedTotal: 0, stickers: 0, discoveredFlowers: [],
+      lastPlayDay: null, streak: 0, unlocked: { backyard:true, forest:false, ocean:false },
+      goldenFound: 0, onboarded: false, celebratedFirst: false,
+    };
+    let parsed = null;
+    try { const raw=localStorage.getItem(this.key); if(raw) parsed=JSON.parse(raw); } catch(e){ parsed=null; }
+    // Only trust a plain object; reject numbers/strings/arrays/null from corrupt storage.
+    if(parsed && typeof parsed==='object' && !Array.isArray(parsed)){
+      this.data = Object.assign({}, defaults, parsed);
+    } else {
+      this.data = Object.assign({}, defaults);
     }
-    // migrate missing fields
+    // validate / repair sub-shapes so a partial-corrupt blob can't crash the game
     const d=this.data;
-    d.unlocked = d.unlocked || { backyard:true, forest:false, ocean:false };
-    d.discoveredFlowers = d.discoveredFlowers || [];
+    if(!d.unlocked || typeof d.unlocked!=='object' || Array.isArray(d.unlocked)){ d.unlocked = {...defaults.unlocked}; }
+    else {
+      if(typeof d.unlocked.backyard!=='boolean') d.unlocked.backyard=true;
+      if(typeof d.unlocked.forest!=='boolean')   d.unlocked.forest=false;
+      if(typeof d.unlocked.ocean!=='boolean')    d.unlocked.ocean=false;
+    }
+    if(!Array.isArray(d.discoveredFlowers)) d.discoveredFlowers=[];
+    if(typeof d.bloomedTotal!=='number' || !isFinite(d.bloomedTotal)) d.bloomedTotal=0;
+    if(typeof d.stickers!=='number'     || !isFinite(d.stickers))     d.stickers=0;
+    if(typeof d.streak!=='number'       || !isFinite(d.streak))       d.streak=0;
+    if(typeof d.goldenFound!=='number'  || !isFinite(d.goldenFound))  d.goldenFound=0;
     return d;
   },
   save(){ try{ localStorage.setItem(this.key, JSON.stringify(this.data)); }catch(e){} },
@@ -549,7 +565,12 @@ const Audio = {
 
   async init(){
     if(this.ctx) return;
-    this.ctx = new (window.AudioContext||window.webkitAudioContext)();
+    try {
+      this.ctx = new (window.AudioContext||window.webkitAudioContext)();
+    } catch(e){
+      console.warn('AudioContext not available — running in silent mode');
+      this.ctx = null; return;
+    }
     this.master = this.ctx.createGain(); this.master.gain.value=0.9; this.master.connect(this.ctx.destination);
     this.musicGain = this.ctx.createGain(); this.musicGain.gain.value=0.0; this.musicGain.connect(this.master);
     // noise buffer for percussive/water sounds
@@ -559,6 +580,7 @@ const Audio = {
 
   async requestMic(){
     await this.init();
+    if(!this.ctx){ this.micDenied=true; this.micReady=false; return false; } // silent mode: no audio available
     if(this.ctx.state==='suspended') await this.ctx.resume();
     try{
       this.stream = await navigator.mediaDevices.getUserMedia({ audio:{ echoCancellation:false, noiseSuppression:false, autoGainControl:false }});
@@ -679,13 +701,15 @@ class Particles {
    ------------------------------------------------------------------------- */
 class Flower {
   constructor(type,x,y,scale){ this.type=type; this.x=x; this.y=y; this.scale=scale; this.stageF=0; this.target=0;
-    this.sway=Math.random()*TAU; this.discovered=false; this.pop=0; this.golden=false; }
+    this.sway=Math.random()*TAU; this.discovered=false; this.pop=0; this.golden=false; this.tapCd=0; this.wiggle=0; }
   update(dt, norm, sway){
     // target bloom stage 0..3 from loudness, with slight per-flower variance
     this.target = norm*3;
     this.stageF = smooth(this.stageF, this.target, this.stageF<this.target?5:2.2, dt);
     this.sway += dt;
     this.pop = Math.max(0, this.pop-dt*3);
+    this.tapCd = Math.max(0, this.tapCd-dt);
+    this.wiggle = Math.max(0, this.wiggle-dt*3);
   }
   stageName(){ const s=Math.round(this.stageF); return ['seed','sprout','bud','bloom'][clamp(s,0,3)]; }
   isBloom(){ return this.stageF>2.5; }
@@ -695,6 +719,7 @@ class Flower {
     const w=img.width*sc, h=img.height*sc;
     const wobble=Math.sin(this.sway*1.4)*swayAmp*8*(0.4+this.stageF*0.2);
     g.save(); g.translate(this.x+wobble, this.y);
+    if(this.wiggle>0) g.rotate(Math.sin(this.wiggle*30)*0.14*this.wiggle); // tap wiggle from the base
     if(this.golden){ g.shadowColor='rgba(255,215,110,0.9)'; g.shadowBlur=40; }
     g.drawImage(img,-w/2,-h, w,h);
     g.restore();
@@ -738,6 +763,9 @@ const Game = {
   bloomedThisSession:new Set(),
   ui:{ toast:null, toastT:0, stickerPop:0, showBook:false, sceneMenuPulse:0 },
   poppuPose:'sleep', poppuBounce:0,
+  poppuBlinkT:3, poppuBlinkDur:0, poppuForceT:0,
+  showHint:false, hintT:0,
+  celebrateT:0, celebrateFlower:null,
   pointer:{x:0,y:0,down:false},
 
   async boot(){
@@ -745,6 +773,7 @@ const Game = {
     Save.load();
     this.resize(); window.addEventListener('resize',()=>this.resize());
     this.bindInput();
+    this.bindLifecycle();
     await Assets.loadAll((d,t)=>{ /* progress */ });
     document.getElementById('loader').classList.add('hidden');
     this.pollen=new Particles(160); this.confetti=new Particles(200); this.water=new Particles(80);
@@ -773,6 +802,23 @@ const Game = {
   },
   evPos(e){ const r=this.canvas.getBoundingClientRect(); return this.toStage((e.clientX-r.left), (e.clientY-r.top)); },
 
+  // Pause mic + audio when tab is hidden (release the mic, stop the leak); resume cleanly when visible.
+  bindLifecycle(){
+    document.addEventListener('visibilitychange', ()=>{
+      if(document.hidden){
+        if(Audio.stream){ Audio.stream.getTracks().forEach(t=>t.stop()); Audio.stream=null; Audio.analyser=null; Audio.micReady=false; }
+        if(Audio.ctx && Audio.ctx.state==='running') Audio.ctx.suspend();
+      } else {
+        if(Audio.ctx && Audio.ctx.state==='suspended') Audio.ctx.resume();
+        // re-acquire the mic (permission already granted) so the garden keeps listening
+        if(this.mode==='playing' && !Audio.micDenied && !Audio.stream && !this._micPending){
+          this._micPending=true;
+          Promise.resolve(Audio.requestMic()).finally(()=>{ this._micPending=false; });
+        }
+      }
+    });
+  },
+
   buildScene(key){
     this.sceneKey=key; const sc=SCENES[key];
     this.flowers=[]; const list=sc.flowers; const n=list.length;
@@ -794,6 +840,13 @@ const Game = {
     this.mode='playing'; this.buildScene(this.sceneKey);
     this.gardenState=GS.SLEEPING; this.wake=0; this.silenceTimer=0;
     Save.checkStreak();
+    // first-ever session: float a "Make a sound!" hint until they bloom or 8s passes
+    if(!Save.data.onboarded && Save.data.bloomedTotal===0){ this.showHint=true; this.hintT=8; }
+  },
+  dismissHint(){
+    if(!this.showHint) return;
+    this.showHint=false;
+    if(!Save.data.onboarded){ Save.data.onboarded=true; Save.save(); }
   },
 
   frame(now){
@@ -876,8 +929,14 @@ const Game = {
     else if(li>=2) pose='water';
     else if(this.wake>0.3) pose='water';
     else pose='sleep';
+    // first-bloom celebration keeps Poppu jumping with joy for a beat
+    if(this.poppuForceT>0){ this.poppuForceT-=dt; pose='excited'; }
     if(pose!==this.poppuPose){ this.poppuPose=pose; this.poppuBounce=1; if(pose==='water')Audio.splash(); }
     this.poppuBounce=Math.max(0,this.poppuBounce-dt*2.5);
+    // idle life: schedule the next blink (whole-face squash) every 3-4s
+    this.poppuBlinkT-=dt;
+    if(this.poppuBlinkT<=0){ this.poppuBlinkT=rand(3,4); this.poppuBlinkDur=0.15; }
+    if(this.poppuBlinkDur>0) this.poppuBlinkDur-=dt;
 
     // birds occasionally when awake
     if(this.wake>0.6 && Math.random()<dt*0.5) Audio.birds();
@@ -886,12 +945,27 @@ const Game = {
     if(this.ui.toastT>0){ this.ui.toastT-=dt; if(this.ui.toastT<=0) this.ui.toast=null; }
     this.ui.stickerPop=Math.max(0,this.ui.stickerPop-dt*1.5);
     this.ui.sceneMenuPulse+=dt;
+
+    // onboarding hint auto-dismiss + first-bloom celebration timers
+    if(this.showHint){ this.hintT-=dt; if(this.hintT<=0) this.dismissHint(); }
+    if(this.celebrateT>0){
+      this.celebrateT-=dt;
+      // extra sparkles around the first flower while the banner is up
+      if(this.celebrateFlower && Math.random()<0.5){
+        this.pollen.spawn({ x:this.celebrateFlower.x+rand(-40,40), y:this.celebrateFlower.y-60+rand(-40,20),
+          vx:rand(-24,24), vy:rand(-50,-10), g:2, life:rand(1,2), r:rand(2,5), hue:'#fff2b0' });
+      }
+      if(this.celebrateT<=0) this.celebrateFlower=null;
+    }
   },
 
   onBloom(f){
     if(!this.bloomedThisSession.has(f)){
       this.bloomedThisSession.add(f);
       Audio.bloomChime();
+      this.dismissHint();
+      // the very first flower ever gets a big celebration moment
+      if(!Save.data.celebratedFirst){ Save.data.celebratedFirst=true; this.firstBloomCelebrate(f); }
       // discovery / progression
       Save.data.bloomedTotal++;
       if(Save.data.discoveredFlowers.indexOf(f.type)<0){ Save.data.discoveredFlowers.push(f.type); }
@@ -908,6 +982,20 @@ const Game = {
     if(!Save.data.unlocked.ocean && total>=SCENES.ocean.unlockAt){ Save.data.unlocked.ocean=true; this.toast('🐚 Ocean Cove unlocked!'); }
   },
   toast(msg){ this.ui.toast=msg; this.ui.toastT=3.2; },
+
+  firstBloomCelebrate(f){
+    this.celebrateT=2.4; this.celebrateFlower=f;
+    this.poppuForceT=2;          // Poppu excited-jumps for 2s
+    this.poppuBounce=1;
+    f.pop=1;
+    Audio.bloomChime(); Audio.golden();   // ascending chime + a little magic sparkle
+    // big colorful confetti burst centered on the first flower
+    for(let i=0;i<60;i++){
+      this.confetti.spawn({ x:f.x+rand(-80,80), y:f.y-80, vx:rand(-160,160), vy:rand(-260,-60), g:260,
+        life:rand(1.6,3), r:rand(4,9), rot:rand(0,TAU), vr:rand(-6,6),
+        hue:pick(['#ff9ecf','#ffe08a','#9ee0b0','#a8c8ff','#ffb08a','#c9a8f0']) });
+    }
+  },
 
   triggerScream(){
     this.screamPhase=1.4; Audio.sparkle();
@@ -997,9 +1085,40 @@ const Game = {
     // scream flash
     if(this.screamPhase>1.2){ g.save(); g.globalAlpha=(this.screamPhase-1.2)/0.2*0.5; g.fillStyle='#fff'; g.fillRect(0,0,STAGE_W,STAGE_H); g.restore(); }
 
+    // first-bloom celebration + onboarding hint (above the HUD)
+    this.renderCelebrate(g);
+    this.renderHint(g);
+
     // UI
     this.renderHUD(g);
     if(this.ui.showBook) this.renderStickerBook(g);
+  },
+
+  renderHint(g){
+    if(!this.showHint) return;
+    const pulse=1+Math.sin(this.time*3)*0.06;
+    g.save(); g.globalAlpha=clamp(this.hintT,0,1); g.translate(STAGE_W/2, STAGE_H*0.30); g.scale(pulse,pulse);
+    const txt='Make a sound! 🎤';
+    g.font='bold 56px "Baloo 2",sans-serif'; g.textAlign='center'; g.textBaseline='middle';
+    const tw=g.measureText(txt).width, pw=tw+90, ph=118;
+    g.shadowColor='rgba(90,70,40,0.25)'; g.shadowBlur=22; g.shadowOffsetY=8;
+    this.rr(g,-pw/2,-ph/2,pw,ph,ph/2); g.fillStyle='rgba(255,255,255,0.96)'; g.fill();
+    // little speech-bubble tail
+    g.beginPath(); g.moveTo(-26,ph/2-10); g.lineTo(0,ph/2+34); g.lineTo(26,ph/2-10); g.closePath(); g.fill();
+    g.shadowColor='transparent'; g.shadowBlur=0; g.shadowOffsetY=0;
+    g.fillStyle='#e8792a'; g.fillText(txt,0,2);
+    g.restore();
+  },
+  renderCelebrate(g){
+    if(this.celebrateT<=0) return;
+    const life=this.celebrateT, p=clamp((2.4-life)/0.4,0,1), sc=0.4+easeOut(p)*0.6;
+    const txt='Your first flower! 🌸';
+    g.save(); g.globalAlpha=clamp(life,0,1); g.translate(STAGE_W/2, STAGE_H*0.26); g.scale(sc,sc);
+    g.font='bold 74px "Baloo 2",sans-serif'; g.textAlign='center'; g.textBaseline='middle';
+    g.lineWidth=14; g.strokeStyle='#fff'; g.lineJoin='round'; g.strokeText(txt,0,0);
+    g.shadowColor='rgba(255,255,255,0.6)'; g.shadowBlur=6;
+    g.fillStyle='#f06aa0'; g.fillText(txt,0,0);
+    g.restore();
   },
 
   drawParticles(g,sys,alpha,square){
@@ -1031,7 +1150,12 @@ const Game = {
     const img=Assets.get('poppu-'+this.poppuPose); if(!img)return;
     const bx=STAGE_W*0.12, by=STAGE_H*0.95; const bounce=Math.sin(this.poppuBounce*Math.PI)* (this.poppuPose==='excited'?40:12);
     const s=0.72;
-    g.save(); g.translate(bx, by-bounce); g.scale(s,s); g.drawImage(img,-img.width/2,-img.height); g.restore();
+    // gentle breathing (2s cycle, +2% scale) so Poppu never looks like a frozen sprite
+    const breathe=1+(Math.sin(this.time*Math.PI)*0.5+0.5)*0.02;
+    // occasional blink as a brief squash (can't edit baked eyes on a real sprite); skip mid-jump
+    let blink=1;
+    if(this.poppuBlinkDur>0 && this.poppuPose!=='excited'){ const p=1-(this.poppuBlinkDur/0.15); blink=1-Math.sin(clamp(p,0,1)*Math.PI)*0.14; }
+    g.save(); g.translate(bx, by-bounce); g.scale(s*breathe, s*breathe*blink); g.drawImage(img,-img.width/2,-img.height); g.restore();
   },
 
   /* ---------------- HUD & menus ---------------- */
@@ -1054,27 +1178,36 @@ const Game = {
     // sticker/book button (top-left)
     g.save(); g.translate(90,90); const fr=Assets.get('ui-sticker-frame');
     g.beginPath(); g.arc(0,0,60,0,TAU); g.fillStyle='rgba(255,255,255,0.7)'; g.fill();
+    g.shadowColor='rgba(255,255,255,0.7)'; g.shadowBlur=4;
     g.font='bold 40px sans-serif'; g.textAlign='center'; g.textBaseline='middle'; g.fillStyle='#c98a2a'; g.fillText('⭐',0,-6);
     g.font='bold 26px "Baloo 2",sans-serif'; g.fillStyle='#6a5a3a'; g.fillText(Save.data.stickers, 0, 30*(1) );
+    g.shadowBlur=0;
     const sp=this.ui.stickerPop; if(sp>0){ g.globalAlpha=sp; g.beginPath(); g.arc(0,0,60+ (1-sp)*40,0,TAU); g.strokeStyle='#ffd985'; g.lineWidth=5; g.stroke(); }
     g.restore();
 
     // streak (top-center small)
-    if(Save.data.streak>0){ g.save(); g.translate(STAGE_W/2,60); g.font='bold 34px "Baloo 2",sans-serif'; g.textAlign='center'; g.fillStyle='rgba(255,255,255,0.9)';
-      g.strokeStyle='rgba(120,90,40,0.6)'; g.lineWidth=6; g.strokeText('🔥 Day '+Save.data.streak,0,0); g.fillText('🔥 Day '+Save.data.streak,0,0); g.restore(); }
+    if(Save.data.streak>0){ g.save(); g.translate(STAGE_W/2,60); g.font='bold 34px "Baloo 2",sans-serif'; g.textAlign='center';
+      g.shadowColor='rgba(90,70,40,0.35)'; g.shadowBlur=8; g.shadowOffsetY=3;
+      g.fillStyle='rgba(255,255,255,0.9)'; g.strokeStyle='rgba(120,90,40,0.6)'; g.lineWidth=6;
+      g.strokeText('🔥 Day '+Save.data.streak,0,0); g.fillText('🔥 Day '+Save.data.streak,0,0); g.restore(); }
 
     // sound-level meter (bottom-right, gentle)
     this.drawMeter(g);
 
     // mic-denied gentle hint
     if(Audio.micDenied){ g.save(); g.globalAlpha=0.85; g.font='bold 30px "Baloo 2",sans-serif'; g.textAlign='center'; g.fillStyle='#fff';
+      g.shadowColor='rgba(90,70,40,0.4)'; g.shadowBlur=8; g.shadowOffsetY=3;
       g.strokeStyle='rgba(90,70,40,0.6)'; g.lineWidth=5; const msg='🎤 Turn on the mic to sing to the garden!';
       g.strokeText(msg,STAGE_W/2,STAGE_H-40); g.fillText(msg,STAGE_W/2,STAGE_H-40); g.restore(); }
 
-    // toast
+    // toast — rounded pill + soft shadow for a premium kawaii feel
     if(this.ui.toast){ const a=clamp(this.ui.toastT,0,1); g.save(); g.globalAlpha=a; g.translate(STAGE_W/2,STAGE_H*0.2);
-      g.font='bold 52px "Baloo 2",sans-serif'; g.textAlign='center'; g.lineWidth=10; g.strokeStyle='#fff'; g.strokeText(this.ui.toast,0,0);
-      g.fillStyle='#e8792a'; g.fillText(this.ui.toast,0,0); g.restore(); }
+      g.font='bold 48px "Baloo 2",sans-serif'; g.textAlign='center'; g.textBaseline='middle';
+      const tw=g.measureText(this.ui.toast).width, pw=tw+90, ph=94;
+      g.save(); g.shadowColor='rgba(90,70,40,0.28)'; g.shadowBlur=20; g.shadowOffsetY=7;
+      this.rr(g,-pw/2,-ph/2,pw,ph,ph/2); g.fillStyle='rgba(255,255,255,0.96)'; g.fill(); g.restore();
+      g.shadowColor='rgba(255,255,255,0.6)'; g.shadowBlur=4;
+      g.fillStyle='#e8792a'; g.fillText(this.ui.toast,0,2); g.restore(); }
   },
   drawMeter(g){
     const x=STAGE_W-70, y=STAGE_H-70, h=180;
@@ -1150,7 +1283,10 @@ const Game = {
       // play
       const r=this._playRect;
       if(r && x>r.x && x<r.x+r.w && y>r.y && y<r.y+r.h){
-        await Audio.requestMic();       // ask mic on the user gesture
+        if(this._micPending) return;    // guard against double-tap while the mic request is pending
+        this._micPending=true;
+        await Audio.requestMic();        // ask mic on the user gesture
+        this._micPending=false;
         this.startPlaying();
       }
       return;
@@ -1164,9 +1300,17 @@ const Game = {
         if(Save.data.unlocked[k]){ if(k!==this.sceneKey){ this.sceneKey=k; this.buildScene(k); this.bloomedThisSession=new Set(); } }
         else { this.toast('🔒 Bloom more flowers to unlock!'); }
         return; } }
-      // tap a flower to give it a little pop of joy
+      // tap a flower (any bloom stage) to give it a little pop of joy — extra delight layer, not a replacement for the mic
       let best=null,bd=90; for(const f of this.flowers){ const d=Math.hypot(x-f.x,y-(f.y-60)); if(d<bd){bd=d;best=f;} }
-      if(best){ best.pop=1; Audio.sparkle(); }
+      if(best && best.tapCd<=0){
+        best.tapCd=0.5; best.pop=1; best.wiggle=1; Audio.sparkle();
+        const F=FLOWERS[best.type]||{color:'#ffd985'};
+        // petal + sparkle burst around the flower head
+        for(let i=0;i<10;i++){ this.confetti.spawn({ x:best.x+rand(-22,22), y:best.y-60+rand(-24,10), vx:rand(-90,90), vy:rand(-150,-40),
+          g:220, life:rand(0.8,1.6), r:rand(3,6), rot:rand(0,TAU), vr:rand(-8,8), hue: (i%2)?F.color:'#fff2b0' }); }
+        for(let i=0;i<6;i++){ this.pollen.spawn({ x:best.x+rand(-16,16), y:best.y-60, vx:rand(-34,34), vy:rand(-56,-12),
+          g:2, life:rand(1,2), r:rand(2,4), hue:'#fff2b0' }); }
+      }
     }
   },
 };
