@@ -8,6 +8,9 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8C%B8%3C/text%3E%3C/svg%3E">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#bfe3d8">
+<meta name="apple-mobile-web-app-title" content="Poppu Garden">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
 <title>Poppu Garden Whisper</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -22,22 +25,35 @@
   #loader {
     position: absolute; inset: 0; display: flex; flex-direction: column;
     align-items: center; justify-content: center;
-    background: linear-gradient(160deg, #2a3a52 0%, #3d4a63 100%);
-    color: #fdf6e3; z-index: 50; transition: opacity 0.6s ease;
+    background: linear-gradient(165deg, #ffe8c4 0%, #cbeadf 46%, #bfe3d8 100%);
+    color: #5a6b52; z-index: 50; transition: opacity 0.6s ease;
+    font-family: 'Baloo 2','Nunito',system-ui,sans-serif;
   }
   #loader.hidden { opacity: 0; pointer-events: none; }
-  .spinner {
-    width: 54px; height: 54px; border-radius: 50%;
-    border: 5px solid rgba(255,255,255,0.25); border-top-color: #ffd985;
-    animation: spin 0.9s linear infinite; margin-bottom: 18px;
+  #loader .seed {
+    font-size: 74px; line-height: 1; margin-bottom: 6px;
+    animation: sway 2.6s ease-in-out infinite; filter: drop-shadow(0 6px 10px rgba(90,80,50,0.18));
   }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  #loader p { font-size: 17px; letter-spacing: 0.5px; opacity: 0.9; }
+  @keyframes sway { 0%,100% { transform: rotate(-6deg) translateY(0); } 50% { transform: rotate(6deg) translateY(-6px); } }
+  #loader .z { position:absolute; margin:-96px 0 0 62px; font-size:26px; color:#8a9a82; opacity:0.7;
+    animation: floatz 2.6s ease-in-out infinite; }
+  @keyframes floatz { 0% { transform: translateY(0); opacity:0; } 40% { opacity:0.8; } 100% { transform: translateY(-30px); opacity:0; } }
+  #loader p { font-size: 21px; font-weight: 700; letter-spacing: 0.3px; color:#5f7256; margin-bottom: 16px; }
+  #loader .bar { width: min(64vw, 340px); height: 20px; border-radius: 12px;
+    background: rgba(255,255,255,0.55); box-shadow: inset 0 2px 5px rgba(90,80,50,0.14); overflow: hidden; }
+  #loader .fill { height: 100%; width: 0%; border-radius: 12px;
+    background: linear-gradient(90deg, #bff0a8, #8ed07a); transition: width 0.25s ease; }
+  #loader .count { margin-top: 12px; font-size: 16px; font-weight: 700; color: #7a8a6f; opacity: 0.85; }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
-<div id="loader"><div class="spinner"></div><p>Waking the garden…</p></div>
+<div id="loader">
+  <div class="seed">🌱</div><div class="z">z</div>
+  <p>Growing the garden…</p>
+  <div class="bar"><div class="fill" id="loadFill"></div></div>
+  <div class="count" id="loadCount">0/61 🌸</div>
+</div>
 <script>
 "use strict";
 /* ============================================================================
@@ -78,21 +94,31 @@ const SCENES = {
     name: 'Backyard', bg: 'bg-backyard', locked: false,
     palette: { sky1:'#ffe8c4', sky2:'#bfe3d8', ground:'#9dcf8f', accent:'#ffd985' },
     nightPalette: { sky1:'#2b3a5c', sky2:'#3d5378', ground:'#3a5540', accent:'#8fa8d8' },
-    flowers: ['tulip','daisy','sunflower','rose','cosmos','bluebell','poppy','lavender','tulip','daisy','cosmos','rose'],
+    // 18 flowers — denser beds along the fence, pond edge and cottage
+    flowers: ['tulip','daisy','sunflower','rose','cosmos','bluebell','poppy','lavender','tulip','daisy','cosmos','rose','sunflower','poppy','bluebell','lavender','tulip','daisy'],
+    decor: [ {key:'rock-gray', x:0.16, y:0.80, s:0.7}, {key:'rock-gray', x:0.62, y:0.905, s:0.55},
+             {key:'mushroom-glow', x:0.90, y:0.86, s:0.6}, {key:'rock-gray', x:0.40, y:0.955, s:0.42} ],
     hasPond: true, hasTree: true,
   },
   forest: {
     name: 'Forest', bg: 'bg-forest', locked: true, unlockAt: 5,
     palette: { sky1:'#4a3d6b', sky2:'#3a5a6b', ground:'#3d4a5c', accent:'#c9a8f0' },
     nightPalette: { sky1:'#2a2340', sky2:'#243a45', ground:'#2a3340', accent:'#a888d0' },
-    flowers: ['bluebell','lavender','cosmos','rose','tulip','poppy','daisy','sunflower','lavender','bluebell'],
+    // 16 rare flowers — clustered round the willow base, stream edge and glowing mushrooms
+    flowers: ['bluebell','lavender','cosmos','rose','tulip','poppy','daisy','sunflower','lavender','bluebell','cosmos','lavender','bluebell','rose','poppy','lavender'],
+    decor: [ {key:'mushroom-glow', x:0.10, y:0.82, s:0.85}, {key:'mushroom-glow', x:0.86, y:0.90, s:0.7},
+             {key:'rock-gray', x:0.55, y:0.955, s:0.5}, {key:'mushroom-glow', x:0.66, y:0.80, s:0.45} ],
     hasPond: true, hasTree: true,
   },
   ocean: {
     name: 'Ocean', bg: 'bg-ocean', locked: true, unlockAt: 12,
     palette: { sky1:'#bff0f0', sky2:'#8fd8d8', ground:'#f0e0b8', accent:'#ff9c8f' },
     nightPalette: { sky1:'#2a4a5c', sky2:'#1f3a4a', ground:'#4a5540', accent:'#8fc0d0' },
-    flowers: ['cosmos','tulip','rose','poppy','daisy','bluebell','lavender','sunflower','cosmos','poppy'],
+    // 16 ocean plants — along the shoreline, coral and tide pool
+    flowers: ['cosmos','tulip','rose','poppy','daisy','bluebell','lavender','sunflower','cosmos','poppy','tulip','cosmos','rose','bluebell','poppy','daisy'],
+    decor: [ {key:'coral-pink', x:0.12, y:0.86, s:0.8}, {key:'seashell-pearl', x:0.30, y:0.95, s:0.5},
+             {key:'starfish', x:0.70, y:0.94, s:0.55}, {key:'coral-pink', x:0.88, y:0.88, s:0.65},
+             {key:'seashell-pearl', x:0.52, y:0.965, s:0.42} ],
     hasPond: false, hasTree: false,
   },
 };
@@ -142,6 +168,7 @@ const Save = {
       bloomedTotal: 0, stickers: 0, discoveredFlowers: [],
       lastPlayDay: null, streak: 0, unlocked: { backyard:true, forest:false, ocean:false },
       goldenFound: 0, onboarded: false, celebratedFirst: false,
+      sessions: 0, playSecToday: 0, playDayKey: null, weekFlowers: 0, weekKey: null,
     };
     let parsed = null;
     try { const raw=localStorage.getItem(this.key); if(raw) parsed=JSON.parse(raw); } catch(e){ parsed=null; }
@@ -164,7 +191,18 @@ const Save = {
     if(typeof d.stickers!=='number'     || !isFinite(d.stickers))     d.stickers=0;
     if(typeof d.streak!=='number'       || !isFinite(d.streak))       d.streak=0;
     if(typeof d.goldenFound!=='number'  || !isFinite(d.goldenFound))  d.goldenFound=0;
+    if(typeof d.sessions!=='number'     || !isFinite(d.sessions))     d.sessions=0;
+    if(typeof d.playSecToday!=='number' || !isFinite(d.playSecToday)) d.playSecToday=0;
+    if(typeof d.weekFlowers!=='number'  || !isFinite(d.weekFlowers))  d.weekFlowers=0;
     return d;
+  },
+  // roll the "today" / "this week" counters over when the day/week changes
+  rollPeriods(){
+    const d=this.data, today=new Date().toDateString();
+    if(d.playDayKey!==today){ d.playDayKey=today; d.playSecToday=0; }
+    const now=new Date(), onejan=new Date(now.getFullYear(),0,1);
+    const wk=now.getFullYear()+'-'+Math.ceil(((now-onejan)/864e5 + onejan.getDay()+1)/7);
+    if(d.weekKey!==wk){ d.weekKey=wk; d.weekFlowers=0; }
   },
   save(){ try{ localStorage.setItem(this.key, JSON.stringify(this.data)); }catch(e){} },
   checkStreak(){
@@ -204,7 +242,7 @@ const Assets = {
     // butterflies
     BUTTERFLIES.forEach(b=> m.push({key:b, file:b, kind:'butterfly', name:b}));
     // misc
-    ['cloud-fluffy','rainbow-arc','tree-oak','sun-sleepy','sun-awake','mushroom-glow','coral-pink','seashell-pearl']
+    ['cloud-fluffy','rainbow-arc','tree-oak','sun-sleepy','sun-awake','mushroom-glow','coral-pink','seashell-pearl','rock-gray','starfish']
       .forEach(k=> m.push({key:k, file:k, kind:k}));
     // ui
     ['ui-play-btn','ui-mic-btn','ui-lock-icon','ui-logo','ui-sticker-frame',
@@ -215,7 +253,8 @@ const Assets = {
 
   loadOne(entry){
     return new Promise(resolve=>{
-      const exts = ['png','webp'];
+      // Backgrounds: try WebP first (≈85% smaller), fall back to PNG. Everything else: PNG.
+      const exts = entry.kind==='bg' ? ['webp','png'] : ['png','webp'];
       let ei = 0;
       const img = new Image();
       const tryNext = ()=>{
@@ -262,6 +301,8 @@ const Placeholder = {
       case 'mushroom-glow': return this.mushroom();
       case 'coral-pink':    return this.coral();
       case 'seashell-pearl':return this.shell();
+      case 'rock-gray':     return this.rock();
+      case 'starfish':      return this.starfishSprite();
       case 'ui-logo':       return this.logo();
       case 'ui-play-btn':   return this.playBtn();
       case 'ui-mic-btn':    return this.micBtn();
@@ -498,6 +539,27 @@ const Placeholder = {
     this.blob(g,0,-14,12,'#ffffff',null);
     return c;
   },
+  rock(){
+    const S=200, c=this.cv(S,S), g=c.getContext('2d'); g.translate(S/2,S*0.62);
+    g.beginPath(); g.moveTo(-80,40); g.quadraticCurveTo(-90,-30,-30,-46);
+    g.quadraticCurveTo(20,-58,64,-30); g.quadraticCurveTo(92,-8,80,40); g.closePath();
+    g.fillStyle='#b8bcc4'; g.fill(); g.lineWidth=6; g.strokeStyle='#8a909c'; g.stroke();
+    g.beginPath(); g.moveTo(-80,40); g.quadraticCurveTo(-40,-30,30,-40); g.quadraticCurveTo(-6,-6,-8,40); g.closePath();
+    g.fillStyle='#cdd2d8'; g.fill();
+    this.blob(g,-30,-8,8,'#e6ebef',null);
+    return c;
+  },
+  starfishSprite(){
+    const S=220, c=this.cv(S,S), g=c.getContext('2d'); g.translate(S/2,S/2);
+    const R=94, r=34, line='#e08a5a';
+    g.beginPath();
+    for(let i=0;i<10;i++){ const rad=i%2?r:R, a=(i/10)*TAU - Math.PI/2; const x=Math.cos(a)*rad, y=Math.sin(a)*rad; i?g.lineTo(x,y):g.moveTo(x,y); }
+    g.closePath(); g.fillStyle='#ffb07a'; g.fill(); g.lineWidth=7; g.strokeStyle=line; g.lineJoin='round'; g.stroke();
+    g.fillStyle='#ffd0a8';
+    for(let i=0;i<5;i++){ const a=(i/5)*TAU - Math.PI/2; g.beginPath(); g.arc(Math.cos(a)*54,Math.sin(a)*54,7,0,TAU); g.fill(); }
+    this.blob(g,0,0,14,'#ffcf9a',null);
+    return c;
+  },
 
   logo(){
     const c=this.cv(900,240), g=c.getContext('2d');
@@ -631,8 +693,36 @@ const Audio = {
     o.start(t0); o.stop(t0+dur+0.05);
     return {o,g};
   },
-  bloomChime(){ if(!this.ctx)return; const t0=this.now(); const notes=[523.25,659.25,783.99,1046.5];
-    notes.forEach((f,i)=> this.tone(f, t0+i*0.06, 0.5, 'sine', 0.14)); },
+  bloomChime(){ if(!this.ctx)return; const t0=this.now();
+    // 3 arpeggio variants so repeated blooms feel musical, not looped
+    const sets=[[523.25,659.25,783.99,1046.5],[587.33,739.99,880.0,1174.7],[493.88,659.25,830.61,987.77]];
+    const notes=pick(sets); notes.forEach((f,i)=> this.tone(f, t0+i*0.06, 0.5, 'sine', 0.14)); },
+  sparkleVary(){ if(!this.ctx)return; const t0=this.now(); const s=this.ctx.createBufferSource(); s.buffer=this.noiseBuffer;
+    const bp=this.ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=pick([5000,6500,8000]); bp.Q.value=8;
+    const g=this.ctx.createGain(); s.connect(bp); bp.connect(g); g.connect(this.master);
+    this.env(g,t0,0.005,0.01,0.09,0.11); s.start(t0); s.stop(t0+0.14);
+    this.tone(pick([880,1046.5,1318.5]), t0, 0.25, 'sine', 0.05); },
+  chirp(){ if(!this.ctx)return; const t0=this.now();
+    [0,0.09,0.18].forEach((d,i)=>{ const o=this.ctx.createOscillator(),g=this.ctx.createGain(),m=this.ctx.createOscillator(),mg=this.ctx.createGain();
+      o.type='sine'; m.type='sine'; m.frequency.value=24; mg.gain.value=120; m.connect(mg); mg.connect(o.frequency);
+      const base=700+i*220; o.frequency.setValueAtTime(base,t0+d); o.frequency.exponentialRampToValueAtTime(base*1.4,t0+d+0.08);
+      o.connect(g); g.connect(this.master); this.env(g,t0+d,0.006,0.02,0.1,0.09); m.start(t0+d); o.start(t0+d); o.stop(t0+d+0.16); m.stop(t0+d+0.16); }); },
+  grabChime(){ if(!this.ctx)return; const t0=this.now(); this.tone(1174.7,t0,0.3,'sine',0.09); this.tone(1567.98,t0+0.02,0.34,'sine',0.05); },
+  shakeChime(){ if(!this.ctx)return; const t0=this.now();
+    for(let k=0;k<5;k++){ const s=this.ctx.createBufferSource(); s.buffer=this.noiseBuffer;
+      const bp=this.ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=3000+k*400; bp.Q.value=6;
+      const g=this.ctx.createGain(); s.connect(bp); bp.connect(g); g.connect(this.master);
+      this.env(g,t0+k*0.04,0.003,0.004,0.03,0.07); s.start(t0+k*0.04); s.stop(t0+k*0.04+0.06); }
+    [659.25,830.6,1046.5].forEach((f,i)=> this.tone(f,t0+0.1+i*0.05,0.5,'sine',0.09)); },
+  startDragChime(){ if(!this.ctx||this.dragNode) return;
+    const o=this.ctx.createOscillator(),g=this.ctx.createGain();
+    o.type='sine'; o.frequency.value=1046.5;
+    const lfo=this.ctx.createOscillator(),lg=this.ctx.createGain(); lfo.frequency.value=6; lg.gain.value=8; lfo.connect(lg); lg.connect(o.frequency);
+    const trem=this.ctx.createOscillator(),tg=this.ctx.createGain(); trem.frequency.value=4; tg.gain.value=0.02; trem.connect(tg); tg.connect(g.gain);
+    g.gain.value=0.0; o.connect(g); g.connect(this.master); o.start(); lfo.start(); trem.start();
+    g.gain.setTargetAtTime(0.04, this.now(), 0.1); this.dragNode={o,g,lfo,trem}; },
+  stopDragChime(){ if(!this.dragNode) return; const n=this.dragNode; this.dragNode=null; const t=this.now();
+    n.g.gain.setTargetAtTime(0.0001,t,0.15); setTimeout(()=>{ try{n.o.stop();n.lfo.stop();n.trem.stop();}catch(e){} }, 400); },
   sparkle(){ if(!this.ctx)return; const t0=this.now(); const s=this.ctx.createBufferSource(); s.buffer=this.noiseBuffer;
     const bp=this.ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=6000; bp.Q.value=8;
     const g=this.ctx.createGain(); s.connect(bp); bp.connect(g); g.connect(this.master);
@@ -669,6 +759,7 @@ const Audio = {
     if(this.musicTimer<=0){
       const day = this.musicMode==='day';
       this.musicTimer = day? 0.36 : 0.62; // ~100bpm vs ~70bpm feel
+      this.musicStep=(this.musicStep+1)%64;
       const scale = day? [523.25,587.33,659.25,783.99,880.0] : [523.25,659.25,783.99,1046.5,1174.7];
       if(Math.random()<(day?0.85:0.6)){
         const f=pick(scale)*(Math.random()<0.2?0.5:1);
@@ -680,10 +771,68 @@ const Audio = {
         g.gain.exponentialRampToValueAtTime(0.0001,t0+(day?0.9:1.6));
         o.start(t0); o.stop(t0+(day?1.0:1.7));
       }
+      // day: soft warm bass note every 4 beats (grounds the kalimba)
+      if(day && this.musicStep%4===0){
+        const bf=pick([130.81,146.83,164.81,196.0]); const o=this.ctx.createOscillator(), g=this.ctx.createGain();
+        o.type='sine'; o.frequency.value=bf; o.connect(g); g.connect(this.musicGain);
+        const t0=this.now(); g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(0.12,t0+0.04);
+        g.gain.exponentialRampToValueAtTime(0.0001,t0+1.4); o.start(t0); o.stop(t0+1.5);
+      }
+      // night: gentle bell overlay every 8 beats (music-box shimmer)
+      if(!day && this.musicStep%8===0){
+        const f=pick([1046.5,1318.5,1567.98]); const o=this.ctx.createOscillator(), g=this.ctx.createGain();
+        const o2=this.ctx.createOscillator(), g2=this.ctx.createGain(); g2.gain.value=0.3;
+        o.type='sine'; o.frequency.value=f; o2.type='sine'; o2.frequency.value=f*2.01; o2.connect(g2); g2.connect(g);
+        o.connect(g); g.connect(this.musicGain); const t0=this.now();
+        g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(0.09,t0+0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001,t0+2.2); o.start(t0); o2.start(t0); o.stop(t0+2.3); o2.stop(t0+2.3);
+      }
     }
   },
   setMusicMode(mode){ this.musicMode=mode; },
   setMusicVol(v){ if(this.musicGain) this.musicGain.gain.setTargetAtTime(v, this.now(), 0.8); },
+
+  // ---- Environmental ambience: layered wind / crickets / waves / birdsong ----
+  ambience:{ scene:null, windGain:null, waveGain:null, waveLFOgain:null, cricketT:0, owlT:0, birdT:0 },
+  _ambInit:false,
+  initAmbience(){
+    if(!this.ctx || this._ambInit) return; this._ambInit=true; const A=this.ambience;
+    // Layer 1 — gentle wind (always on, very quiet)
+    const s=this.ctx.createBufferSource(); s.buffer=this.noiseBuffer; s.loop=true;
+    const lp=this.ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=520;
+    const g=this.ctx.createGain(); g.gain.value=0.0;
+    const lfo=this.ctx.createOscillator(),lg=this.ctx.createGain(); lfo.frequency.value=0.08; lg.gain.value=0.006; lfo.connect(lg); lg.connect(g.gain);
+    s.connect(lp); lp.connect(g); g.connect(this.master); s.start(); lfo.start(); A.windGain=g;
+    // Layer 3 — ocean wave wash (filtered noise + slow swell LFO)
+    const s2=this.ctx.createBufferSource(); s2.buffer=this.noiseBuffer; s2.loop=true;
+    const lp2=this.ctx.createBiquadFilter(); lp2.type='lowpass'; lp2.frequency.value=380;
+    const g2=this.ctx.createGain(); g2.gain.value=0.0;
+    const lfo2=this.ctx.createOscillator(),lg2=this.ctx.createGain(); lfo2.frequency.value=0.14; lg2.gain.value=0.0; lfo2.connect(lg2); lg2.connect(g2.gain);
+    s2.connect(lp2); lp2.connect(g2); g2.connect(this.master); s2.start(); lfo2.start();
+    A.waveGain=g2; A.waveLFOgain=lg2;
+  },
+  setAmbience(scene){
+    this.initAmbience(); if(!this.ctx) return; const t=this.now(); const A=this.ambience; A.scene=scene;
+    if(A.windGain)    A.windGain.gain.setTargetAtTime(0.012, t, 0.6);                    // wind everywhere
+    if(A.waveGain)    A.waveGain.gain.setTargetAtTime(scene==='ocean'?0.05:0.0, t, 0.9); // waves in ocean
+    if(A.waveLFOgain) A.waveLFOgain.gain.setTargetAtTime(scene==='ocean'?0.04:0.0, t, 0.9);
+    A.cricketT=rand(0.5,1.5); A.owlT=rand(5,9); A.birdT=rand(1.5,3.5);
+  },
+  updateAmbience(dt){
+    if(!this.ctx) return; const A=this.ambience; if(!A.scene) return;
+    if(A.scene==='forest'){
+      A.cricketT-=dt; if(A.cricketT<=0){ A.cricketT=rand(0.5,1.6); this.cricket(); }
+      A.owlT-=dt;     if(A.owlT<=0){ A.owlT=rand(7,15); this.owl(); }
+    } else if(A.scene==='backyard'){
+      A.birdT-=dt; if(A.birdT<=0){ A.birdT=rand(3,7); this.birds(); }
+    }
+  },
+  cricket(){ if(!this.ctx)return; const t0=this.now(); for(let k=0;k<3;k++){ const o=this.ctx.createOscillator(),g=this.ctx.createGain();
+    o.type='square'; o.frequency.value=4200+rand(-200,200); o.connect(g); g.connect(this.master);
+    this.env(g,t0+k*0.06,0.004,0.005,0.03,0.018); o.start(t0+k*0.06); o.stop(t0+k*0.06+0.07); } },
+  owl(){ if(!this.ctx)return; const t0=this.now(); [0,0.55].forEach(d=>{ const o=this.ctx.createOscillator(),g=this.ctx.createGain();
+    o.type='sine'; o.frequency.setValueAtTime(340,t0+d); o.frequency.exponentialRampToValueAtTime(300,t0+d+0.25);
+    o.connect(g); g.connect(this.master); this.env(g,t0+d,0.03,0.08,0.2,0.045); o.start(t0+d); o.stop(t0+d+0.42); }); },
 };
 
 /* ---------------------------------------------------------------------------
@@ -727,14 +876,23 @@ class Flower {
 }
 class Butterfly {
   constructor(x,y){ this.type=pick(BUTTERFLIES); this.x=x; this.y=y; this.vx=rand(-40,40); this.vy=rand(-30,-10);
-    this.t=Math.random()*TAU; this.scale=rand(0.5,0.85); this.life=rand(8,16); this.flap=0; }
-  update(dt){ this.t+=dt*rand(1.5,2.4); this.life-=dt;
+    this.t=Math.random()*TAU; this.scale=rand(0.5,0.85); this.life=rand(8,16); this.flap=0;
+    this.grabbed=false; this.glow=0; }
+  update(dt){
+    this.flap+=dt*(this.grabbed?26:18);
+    this.glow=this.grabbed ? Math.min(1,this.glow+dt*4) : Math.max(0,this.glow-dt*2);
+    if(this.grabbed){ this.t+=dt*3; return; }   // held by finger: position set externally, no drift/aging
+    this.t+=dt*rand(1.5,2.4); this.life-=dt;
     this.vx += Math.cos(this.t)*30*dt; this.vy += (Math.sin(this.t*1.3)*24 - 6)*dt;
     this.vx=clamp(this.vx,-70,70); this.vy=clamp(this.vy,-60,40);
-    this.x+=this.vx*dt; this.y+=this.vy*dt; this.flap+=dt*18;
+    this.x+=this.vx*dt; this.y+=this.vy*dt;
     if(this.x<-60)this.x=STAGE_W+40; if(this.x>STAGE_W+60)this.x=-40; if(this.y<40)this.vy+=20*dt; }
   draw(g){ const img=Assets.get(this.type); if(!img) return; const flap=0.6+Math.abs(Math.sin(this.flap))*0.5;
-    g.save(); g.translate(this.x,this.y); g.scale(this.scale*(this.vx<0?-1:1)*flap, this.scale);
+    const held=this.grabbed||this.glow>0.01;
+    g.save(); g.translate(this.x,this.y);
+    if(held){ g.shadowColor='rgba(255,240,170,'+(0.9*this.glow)+')'; g.shadowBlur=30*this.glow; }
+    const sc=this.scale*(this.grabbed?1.18:1);
+    g.scale(sc*(this.vx<0?-1:1)*flap, sc);
     g.globalAlpha=clamp(this.life,0,1); g.drawImage(img,-img.width/2,-img.height/2); g.restore(); g.globalAlpha=1; }
 }
 class Cloud {
@@ -761,12 +919,15 @@ const Game = {
   goldenTimer:60, goldenActive:0,
   time:0, last:0,
   bloomedThisSession:new Set(),
-  ui:{ toast:null, toastT:0, stickerPop:0, showBook:false, sceneMenuPulse:0 },
+  ui:{ toast:null, toastT:0, stickerPop:0, showBook:false, showParent:false, sceneMenuPulse:0 },
   poppuPose:'sleep', poppuBounce:0,
   poppuBlinkT:3, poppuBlinkDur:0, poppuForceT:0,
   showHint:false, hintT:0,
   celebrateT:0, celebrateFlower:null,
   pointer:{x:0,y:0,down:false},
+  press:null, poppuWave:0, poppuWaveCd:0,
+  shakeWave:0, shakeCd:0, decor:[],
+  playSessionStart:0,
 
   async boot(){
     this.canvas=document.getElementById('game'); this.g=this.canvas.getContext('2d');
@@ -774,7 +935,18 @@ const Game = {
     this.resize(); window.addEventListener('resize',()=>this.resize());
     this.bindInput();
     this.bindLifecycle();
-    await Assets.loadAll((d,t)=>{ /* progress */ });
+    this.bindMotion();
+    const bootStart=performance.now();
+    const fill=document.getElementById('loadFill'), count=document.getElementById('loadCount');
+    await Assets.loadAll((d,t)=>{
+      const pct=Math.round(d/t*100);
+      if(fill) fill.style.width=pct+'%';
+      if(count) count.textContent=d+'/'+t+' 🌸';
+    });
+    if(fill) fill.style.width='100%';
+    // premium feel: hold the loading screen a minimum 1.5s even on fast loads
+    const elapsed=performance.now()-bootStart;
+    if(elapsed<1500) await new Promise(r=>setTimeout(r,1500-elapsed));
     document.getElementById('loader').classList.add('hidden');
     this.pollen=new Particles(160); this.confetti=new Particles(200); this.water=new Particles(80);
     this.clouds=[]; for(let i=0;i<5;i++) this.clouds.push(new Cloud());
@@ -792,15 +964,32 @@ const Game = {
   toStage(cx,cy){ return { x:(cx-this.ox)/this.scale, y:(cy-this.oy)/this.scale }; },
 
   bindInput(){
-    const down=e=>{ const p=this.evPos(e); this.pointer.down=true; this.pointer.x=p.x; this.pointer.y=p.y; this.onTap(p.x,p.y); };
-    const move=e=>{ const p=this.evPos(e); this.pointer.x=p.x; this.pointer.y=p.y; };
-    const up=()=>{ this.pointer.down=false; };
+    const down=e=>{ const p=this.evPos(e); this.pointer.down=true; this.pointer.x=p.x; this.pointer.y=p.y; this.onPressDown(p.x,p.y); };
+    const move=e=>{ const p=this.evPos(e); this.pointer.x=p.x; this.pointer.y=p.y; this.onPressMove(p.x,p.y); };
+    const up=e=>{ if(e && (e.clientX!==undefined)){ const p=this.evPos(e); this.pointer.x=p.x; this.pointer.y=p.y; } this.pointer.down=false; this.onPressUp(this.pointer.x,this.pointer.y); };
     this.canvas.addEventListener('mousedown',down); this.canvas.addEventListener('mousemove',move); window.addEventListener('mouseup',up);
     this.canvas.addEventListener('touchstart',e=>{ e.preventDefault(); down(e.changedTouches[0]); },{passive:false});
     this.canvas.addEventListener('touchmove',e=>{ e.preventDefault(); move(e.changedTouches[0]); },{passive:false});
-    this.canvas.addEventListener('touchend',e=>{ e.preventDefault(); up(); },{passive:false});
+    this.canvas.addEventListener('touchend',e=>{ e.preventDefault(); up(e.changedTouches[0]); },{passive:false});
   },
   evPos(e){ const r=this.canvas.getBoundingClientRect(); return this.toStage((e.clientX-r.left), (e.clientY-r.top)); },
+
+  // ---- DeviceMotion: shake to pollinate ----
+  bindMotion(){
+    this.shakeCd=0; this._lastAcc=null;
+    window.addEventListener('devicemotion', e=>{
+      const a=e.accelerationIncludingGravity||e.acceleration; if(!a) return;
+      if(this._lastAcc){ const dx=(a.x||0)-this._lastAcc.x, dy=(a.y||0)-this._lastAcc.y, dz=(a.z||0)-this._lastAcc.z;
+        const delta=Math.sqrt(dx*dx+dy*dy+dz*dz);
+        if(delta>18 && this.shakeCd<=0 && this.mode==='playing'){ this.triggerShake(); this.shakeCd=2; }
+      }
+      this._lastAcc={x:a.x||0,y:a.y||0,z:a.z||0};
+    });
+  },
+  requestMotionPerm(){
+    try{ if(typeof DeviceMotionEvent!=='undefined' && typeof DeviceMotionEvent.requestPermission==='function'){
+      DeviceMotionEvent.requestPermission().catch(()=>{}); } }catch(e){}
+  },
 
   // Pause mic + audio when tab is hidden (release the mic, stop the leak); resume cleanly when visible.
   bindLifecycle(){
@@ -822,24 +1011,36 @@ const Game = {
   buildScene(key){
     this.sceneKey=key; const sc=SCENES[key];
     this.flowers=[]; const list=sc.flowers; const n=list.length;
-    const groundY=STAGE_H*0.82, spread=STAGE_W*0.86, startX=STAGE_W*0.07;
+    // 3 depth rows of 6; front rows sit lower + larger for a natural, dense bed.
+    const perRow=6, rows=Math.ceil(n/perRow);
+    const spread=STAGE_W*0.88, startX=STAGE_W*0.06;
     for(let i=0;i<n;i++){
-      const col=i%6, row=(i/6)|0;
-      const x=startX + (spread/5)*col + rand(-24,24);
-      const y=groundY + row*84 + rand(-12,12);
-      const scale=rand(0.60,0.86) * (row===1?1.10:1.0);
+      const row=(i/perRow)|0, col=i%perRow;
+      // stagger every other row half a cell so flowers nest instead of lining up
+      const stagger=(row%2)? (spread/(perRow-1))*0.5 : 0;
+      const y=STAGE_H*0.80 + row*72 + rand(-14,14);
+      let x=startX + (spread/(perRow-1))*col + stagger + rand(-30,30);
+      x=clamp(x, STAGE_W*0.04, STAGE_W*0.96);
+      const depth=row/Math.max(1,rows-1);           // 0 back .. 1 front
+      const scale=lerp(0.58,0.90,depth) * rand(0.92,1.08);
       this.flowers.push(new Flower(list[i], x, y, scale));
     }
+    // decorative static objects (rocks / mushrooms / shells / starfish)
+    this.decor=(sc.decor||[]).map(d=>({ key:d.key, x:d.x*STAGE_W, y:d.y*STAGE_H, s:d.s }));
     // sort back-to-front
     this.flowers.sort((a,b)=>a.y-b.y);
     this.butterflies=[]; this.rainbow=0;
     Audio.startRiver();
+    Audio.setAmbience(key);
   },
 
   startPlaying(){
     this.mode='playing'; this.buildScene(this.sceneKey);
     this.gardenState=GS.SLEEPING; this.wake=0; this.silenceTimer=0;
     Save.checkStreak();
+    Save.rollPeriods();
+    Save.data.sessions++; Save.save();
+    this.playSessionStart=this.time; this._playAccum=0;
     // first-ever session: float a "Make a sound!" hint until they bloom or 8s passes
     if(!Save.data.onboarded && Save.data.bloomedTotal===0){ this.showHint=true; this.hintT=8; }
   },
@@ -851,7 +1052,7 @@ const Game = {
 
   frame(now){
     let dt=(now-this.last)/1000; this.last=now; if(dt>0.05)dt=0.05; this.time+=dt;
-    if(this.mode==='playing'){ Audio.update(dt, this.time); Audio.updateMusic(dt); this.updatePlay(dt); }
+    if(this.mode==='playing'){ Audio.update(dt, this.time); Audio.updateMusic(dt); Audio.updateAmbience(dt); this.updatePlay(dt); }
     else { Audio.updateMusic(dt); }
     this.render(dt);
     requestAnimationFrame(t=>this.frame(t));
@@ -886,14 +1087,18 @@ const Game = {
       if(after && !before){ this.onBloom(f); }
     }
 
-    // --- butterflies: count proportional to loudness, spawn from bloomed flowers ---
-    const targetB = Math.round(eff*eff*22);
-    if(this.butterflies.length<targetB && Math.random()<0.4){
+    // --- butterflies: count proportional to loudness (TALK~12, SING~30+), spawn from bloomed flowers ---
+    // eff at TALK ≈ 0.64 -> ~13, at SING ≈ 1.0 -> ~32
+    const targetB = Math.round(eff*eff*32);
+    if(this.butterflies.length<targetB && Math.random()<0.5){
       const src=pick(this.flowers.filter(f=>f.isBloom()));
       if(src) this.butterflies.push(new Butterfly(src.x, src.y-60));
     }
-    for(let i=this.butterflies.length-1;i>=0;i--){ const b=this.butterflies[i]; b.update(dt); if(b.life<=0) this.butterflies.splice(i,1); }
-    if(this.butterflies.length>targetB+4 && Math.random()<0.5) this.butterflies.pop();
+    for(let i=this.butterflies.length-1;i>=0;i--){ const b=this.butterflies[i]; b.update(dt); if(!b.grabbed && b.life<=0) this.butterflies.splice(i,1); }
+    if(this.butterflies.length>targetB+5 && Math.random()<0.5){
+      // never cull the butterfly the child is holding
+      const idx=this.butterflies.findIndex(b=>!b.grabbed); if(idx>=0) this.butterflies.splice(idx,1);
+    }
 
     // --- clouds (ambient) ---
     for(const c of this.clouds) c.update(dt);
@@ -922,6 +1127,22 @@ const Game = {
     if(this.goldenTimer<=0){ this.goldenTimer=60; if(Math.random()<0.10) this.triggerGolden(); }
     if(this.goldenActive>0){ this.goldenActive-=dt; }
 
+    // --- multi-interaction hold timers ---
+    if(this.shakeCd>0) this.shakeCd-=dt;
+    if(this.shakeWave>0) this.shakeWave-=dt*1.2;
+    if(this.poppuWaveCd>0) this.poppuWaveCd-=dt;
+    if(this.poppuWave>0) this.poppuWave-=dt*1.5;
+    const pr=this.press;
+    if(pr && !pr.moved){
+      const held=this.time-pr.t0;
+      // long-press a butterfly (300ms) -> it attaches to the finger
+      if(!pr.grabbed && pr.bfly && this.butterflies.indexOf(pr.bfly)>=0 && held>0.3){
+        pr.grabbed=true; pr.bfly.grabbed=true; Audio.grabChime(); Audio.startDragChime();
+      }
+      // long-press Poppu (3s) -> parent dashboard
+      if(!pr.consumed && pr.onPoppu && !pr.grabbed && held>=3){ pr.consumed=true; this.openParent(); }
+    }
+
     // --- poppu pose ---
     let pose='sleep';
     if(this.screamPhase>0) pose='ears-covered';
@@ -940,6 +1161,10 @@ const Game = {
 
     // birds occasionally when awake
     if(this.wake>0.6 && Math.random()<dt*0.5) Audio.birds();
+
+    // playtime tracking for the parent dashboard (flush to storage every ~5s)
+    this._playAccum=(this._playAccum||0)+dt;
+    if(this._playAccum>=5){ Save.rollPeriods(); Save.data.playSecToday+=this._playAccum; this._playAccum=0; Save.save(); }
 
     // toast timer
     if(this.ui.toastT>0){ this.ui.toastT-=dt; if(this.ui.toastT<=0) this.ui.toast=null; }
@@ -968,6 +1193,7 @@ const Game = {
       if(!Save.data.celebratedFirst){ Save.data.celebratedFirst=true; this.firstBloomCelebrate(f); }
       // discovery / progression
       Save.data.bloomedTotal++;
+      Save.rollPeriods(); Save.data.weekFlowers++;
       if(Save.data.discoveredFlowers.indexOf(f.type)<0){ Save.data.discoveredFlowers.push(f.type); }
       // sticker every 3 blooms
       if(this.bloomedThisSession.size % 3 === 0){ Save.data.stickers++; this.ui.stickerPop=1; this.toast('⭐ New sticker!'); }
@@ -1055,6 +1281,10 @@ const Game = {
     if(sc.hasTree && !Assets.isReal(sc.bg)){ const tr=Assets.get(this.sceneKey==='forest'?'mushroom-glow':'tree-oak');
       if(tr){ const s=this.sceneKey==='forest'?1.4:1.5; g.save(); g.translate(STAGE_W*0.14, STAGE_H*0.80); g.scale(s,s); g.drawImage(tr,-tr.width/2,-tr.height); g.restore(); } }
 
+    // decorative static objects (rocks / mushrooms / shells / starfish) — sit on the ground behind flowers
+    if(this.decor){ for(const d of this.decor){ const im=Assets.get(d.key); if(!im) continue;
+      g.save(); g.globalAlpha=lerp(0.55,1,wake); g.translate(d.x,d.y); g.scale(d.s,d.s); g.drawImage(im,-im.width/2,-im.height); g.restore(); } }
+
     // rainbow
     if(this.rainbow>0.02){ const rb=Assets.get('rainbow-arc'); if(rb){ g.save(); g.globalAlpha=this.rainbow*0.9;
       const w=STAGE_W*0.7, h=w*(rb.height/rb.width); g.drawImage(rb, STAGE_W*0.15, STAGE_H*0.18, w, h); g.restore(); } }
@@ -1077,6 +1307,10 @@ const Game = {
 
     // confetti + golden glow
     if(this.goldenActive>0){ g.save(); g.globalAlpha=clamp(this.goldenActive/4,0,1)*0.3; g.fillStyle='#fff2b0'; g.fillRect(0,0,STAGE_W,STAGE_H); g.restore(); }
+    // shake-to-pollinate golden sparkle wave
+    if(this.shakeWave>0){ const p=1-clamp(this.shakeWave,0,1); g.save(); g.globalAlpha=clamp(this.shakeWave,0,1)*0.5;
+      g.strokeStyle='#ffe89a'; g.lineWidth=48*clamp(this.shakeWave,0,1); g.beginPath();
+      g.arc(STAGE_W/2, STAGE_H*0.6, lerp(80,STAGE_W*0.72,p), 0, TAU); g.stroke(); g.restore(); }
     this.drawParticles(g,this.confetti,1,true);
 
     // poppu
@@ -1092,6 +1326,7 @@ const Game = {
     // UI
     this.renderHUD(g);
     if(this.ui.showBook) this.renderStickerBook(g);
+    if(this.ui.showParent) this.renderParent(g);
   },
 
   renderHint(g){
@@ -1155,7 +1390,16 @@ const Game = {
     // occasional blink as a brief squash (can't edit baked eyes on a real sprite); skip mid-jump
     let blink=1;
     if(this.poppuBlinkDur>0 && this.poppuPose!=='excited'){ const p=1-(this.poppuBlinkDur/0.15); blink=1-Math.sin(clamp(p,0,1)*Math.PI)*0.14; }
-    g.save(); g.translate(bx, by-bounce); g.scale(s*breathe, s*breathe*blink); g.drawImage(img,-img.width/2,-img.height); g.restore();
+    // wave wobble when Poppu is tapped (rock side-to-side)
+    const waveRot=this.poppuWave>0 ? Math.sin(this.time*22)*0.12*clamp(this.poppuWave,0,1) : 0;
+    g.save(); g.translate(bx, by-bounce);
+    if(waveRot){ g.translate(0,-img.height*s*0.5); g.rotate(waveRot); g.translate(0,img.height*s*0.5); }
+    g.scale(s*breathe, s*breathe*blink); g.drawImage(img,-img.width/2,-img.height); g.restore();
+    // little waving-paw sparkles + "hi!" bubble
+    if(this.poppuWave>0.2){ g.save(); g.globalAlpha=clamp(this.poppuWave,0,1);
+      g.font='bold 44px "Baloo 2",sans-serif'; g.textAlign='center'; g.fillStyle='#fff';
+      g.strokeStyle='rgba(90,70,40,0.5)'; g.lineWidth=6;
+      g.strokeText('hi! 👋', bx+70, by-img.height*s-6); g.fillText('hi! 👋', bx+70, by-img.height*s-6); g.restore(); }
   },
 
   /* ---------------- HUD & menus ---------------- */
@@ -1237,6 +1481,64 @@ const Game = {
     g.restore();
   },
 
+  renderParent(g){
+    g.save();
+    g.fillStyle='rgba(40,50,70,0.55)'; g.fillRect(0,0,STAGE_W,STAGE_H);
+    const bw=STAGE_W*0.60, bh=STAGE_H*0.80, bx=(STAGE_W-bw)/2, by=(STAGE_H-bh)/2;
+    this._parentCard={x:bx,y:by,w:bw,h:bh};
+    // soft pastel card
+    g.save(); g.shadowColor='rgba(40,50,70,0.35)'; g.shadowBlur=40; g.shadowOffsetY=12;
+    this.rr(g,bx,by,bw,bh,44); const gr=g.createLinearGradient(0,by,0,by+bh);
+    gr.addColorStop(0,'#fdf7ef'); gr.addColorStop(1,'#eef6ef'); g.fillStyle=gr; g.fill(); g.restore();
+    g.lineWidth=8; g.strokeStyle='#cfe3d6'; this.rr(g,bx,by,bw,bh,44); g.stroke();
+    // header
+    g.textAlign='center'; g.textBaseline='middle';
+    g.font='bold 46px "Baloo 2",sans-serif'; g.fillStyle='#6a7a62'; g.fillText('For Parents 👆', STAGE_W/2, by+58);
+    g.font='600 24px "Baloo 2",sans-serif'; g.fillStyle='#9aa896'; g.fillText("A gentle peek at this week's play", STAGE_W/2, by+96);
+
+    // stat tiles (2 columns)
+    const mins=Math.max(0, Math.round(Save.data.playSecToday/60));
+    const tiles=[
+      ['🌸', Save.data.bloomedTotal, 'flowers grown'],
+      ['⏱️', mins+(mins===1?' min':' mins'), 'played today'],
+      ['🔥', 'Day '+Save.data.streak, 'streak'],
+      ['🎮', Save.data.sessions, 'play sessions'],
+      ['⭐', Save.data.stickers+'/40', 'stickers'],
+      ['✨', Save.data.goldenFound, 'golden surprises'],
+    ];
+    const cols=2, tw=(bw-90)/cols, th=92, tx0=bx+30, ty0=by+130;
+    tiles.forEach((t,i)=>{ const cx=tx0+(i%cols)*(tw+30), cy=ty0+((i/cols)|0)*(th+16);
+      this.rr(g,cx,cy,tw,th,22); g.fillStyle='#ffffff'; g.fill(); g.lineWidth=3; g.strokeStyle='#e6efe6'; g.stroke();
+      g.textAlign='left'; g.font='40px sans-serif'; g.fillText(t[0], cx+22, cy+th/2);
+      g.font='bold 40px "Baloo 2",sans-serif'; g.fillStyle='#5f7256'; g.fillText(String(t[1]), cx+80, cy+th/2-12);
+      g.font='600 22px "Baloo 2",sans-serif'; g.fillStyle='#9aa896'; g.fillText(t[2], cx+80, cy+th/2+22);
+    });
+
+    // scene progress
+    let py=ty0+3*(th+16)+18;
+    g.textAlign='center'; g.font='bold 26px "Baloo 2",sans-serif'; g.fillStyle='#7a8a72';
+    const sceneLine='Backyard '+ (Save.data.unlocked.forest?'✓':'✓') +'   Forest '+(Save.data.unlocked.forest?'✓':'🔒')+'   Ocean '+(Save.data.unlocked.ocean?'✓':'🔒');
+    g.fillText(sceneLine, STAGE_W/2, py);
+    // weekly report line
+    py+=44; g.font='600 24px "Baloo 2",sans-serif'; g.fillStyle='#8a9a82';
+    g.fillText('🌱 This week: '+Save.data.weekFlowers+' flowers · '+Save.data.stickers+' ⭐ · '+Save.data.streak+'🔥', STAGE_W/2, py);
+
+    // share button
+    const sbw=340, sbh=70, sbx=STAGE_W/2-sbw/2, sby=by+bh-100;
+    this._parentShare={x:sbx,y:sby,w:sbw,h:sbh};
+    this.rr(g,sbx,sby,sbw,sbh,35); const sg=g.createLinearGradient(0,sby,0,sby+sbh);
+    sg.addColorStop(0,'#bff0a8'); sg.addColorStop(1,'#8ed07a'); g.fillStyle=sg; g.fill();
+    g.font='bold 30px "Baloo 2",sans-serif'; g.fillStyle='#3a5a2a'; g.textAlign='center';
+    g.fillText('💚 Share our garden', STAGE_W/2, sby+sbh/2);
+
+    // close X
+    const cxp=bx+bw-46, cyp=by+46; this._parentClose={x:cxp,y:cyp};
+    g.beginPath(); g.arc(cxp,cyp,26,0,TAU); g.fillStyle='#f0d8d8'; g.fill();
+    g.strokeStyle='#c98a8a'; g.lineWidth=5; g.lineCap='round';
+    g.beginPath(); g.moveTo(cxp-9,cyp-9); g.lineTo(cxp+9,cyp+9); g.moveTo(cxp+9,cyp-9); g.lineTo(cxp-9,cyp+9); g.stroke();
+    g.restore();
+  },
+
   /* ---------------- start screen ---------------- */
   renderStart(g){
     // painted twilight bg
@@ -1276,7 +1578,7 @@ const Game = {
   },
 
   /* ---------------- input handling ---------------- */
-  async onTap(x,y){
+  async onPressDown(x,y){
     if(this.mode==='start'){
       // banner dismiss
       if(this._bannerRect && x>this._bannerRect.x && x<this._bannerRect.x+this._bannerRect.w && y>this._bannerRect.y && y<this._bannerRect.y+this._bannerRect.h){ this._bannerDismissed=true; return; }
@@ -1285,38 +1587,113 @@ const Game = {
       if(r && x>r.x && x<r.x+r.w && y>r.y && y<r.y+r.h){
         if(this._micPending) return;    // guard against double-tap while the mic request is pending
         this._micPending=true;
+        this.requestMotionPerm();        // ask motion (iOS) on the same user gesture
         await Audio.requestMic();        // ask mic on the user gesture
         this._micPending=false;
         this.startPlaying();
       }
       return;
     }
-    if(this.mode==='playing'){
-      if(this.ui.showBook){ this.ui.showBook=false; return; }
-      // sticker book button (top-left)
-      if(Math.hypot(x-90,y-90)<64){ this.ui.showBook=true; return; }
-      // scene buttons
-      for(const k of SCENE_ORDER){ const b=this._sceneBtns&&this._sceneBtns[k]; if(b && Math.hypot(x-b.x,y-b.y)<b.r){
-        if(Save.data.unlocked[k]){ if(k!==this.sceneKey){ this.sceneKey=k; this.buildScene(k); this.bloomedThisSession=new Set(); } }
-        else { this.toast('🔒 Bloom more flowers to unlock!'); }
-        return; } }
-      // tap a flower (any bloom stage) to give it a little pop of joy — extra delight layer, not a replacement for the mic
-      let best=null,bd=90; for(const f of this.flowers){ const d=Math.hypot(x-f.x,y-(f.y-60)); if(d<bd){bd=d;best=f;} }
-      if(best && best.tapCd<=0){
-        best.tapCd=0.5; best.pop=1; best.wiggle=1; Audio.sparkle();
-        const F=FLOWERS[best.type]||{color:'#ffd985'};
-        // petal + sparkle burst around the flower head
-        for(let i=0;i<10;i++){ this.confetti.spawn({ x:best.x+rand(-22,22), y:best.y-60+rand(-24,10), vx:rand(-90,90), vy:rand(-150,-40),
-          g:220, life:rand(0.8,1.6), r:rand(3,6), rot:rand(0,TAU), vr:rand(-8,8), hue: (i%2)?F.color:'#fff2b0' }); }
-        for(let i=0;i<6;i++){ this.pollen.spawn({ x:best.x+rand(-16,16), y:best.y-60, vx:rand(-34,34), vy:rand(-56,-12),
-          g:2, life:rand(1,2), r:rand(2,4), hue:'#fff2b0' }); }
-      }
+    if(this.mode!=='playing') return;
+    // modals first
+    if(this.ui.showParent){ this.parentTap(x,y); return; }
+    if(this.ui.showBook){ this.ui.showBook=false; return; }
+    // immediate UI buttons
+    if(Math.hypot(x-90,y-90)<64){ this.ui.showBook=true; return; }
+    for(const k of SCENE_ORDER){ const b=this._sceneBtns&&this._sceneBtns[k]; if(b && Math.hypot(x-b.x,y-b.y)<b.r){
+      if(Save.data.unlocked[k]){ if(k!==this.sceneKey){ this.sceneKey=k; this.buildScene(k); this.bloomedThisSession=new Set(); } }
+      else { this.toast('🔒 Bloom more flowers to unlock!'); }
+      return; } }
+    // otherwise begin a press we resolve on hold / release (butterfly grab, Poppu tap/long-press, flower tap)
+    // Poppu wins its own corner so the parent long-press is never hijacked by a butterfly drifting over it
+    const onPoppu=this.hitPoppu(x,y);
+    this.press={ x0:x, y0:y, t0:this.time, moved:false, bfly:onPoppu?null:this.findButterfly(x,y), onPoppu, grabbed:false, consumed:false };
+  },
+  onPressMove(x,y){
+    const pr=this.press; if(!pr) return;
+    if(Math.hypot(x-pr.x0,y-pr.y0)>24) pr.moved=true;
+    if(pr.grabbed && pr.bfly){ pr.bfly.x=x; pr.bfly.y=y;
+      if(Math.random()<0.6) this.pollen.spawn({ x:x+rand(-10,10), y:y+rand(-6,14), vx:rand(-20,20), vy:rand(-30,-4), g:1, life:rand(0.5,1.1), r:rand(2,4), hue:'#fff2b0' });
     }
+  },
+  onPressUp(x,y){
+    const pr=this.press; this.press=null; if(!pr) return;
+    if(pr.grabbed && pr.bfly){ this.releaseButterfly(pr.bfly); return; }
+    if(pr.consumed) return;               // long-press already opened the parent dashboard
+    if(pr.moved) return;                  // a drag that never grabbed anything
+    if(pr.onPoppu){ this.wavePoppu(); return; }
+    this.tapFlower(x,y);
+  },
+
+  findButterfly(x,y){ let best=null,bd=1e9; for(const b of this.butterflies){ const d=Math.hypot(x-b.x,y-b.y); const r=60*b.scale+34; if(d<r && d<bd){bd=d;best=b;} } return best; },
+  hitPoppu(x,y){ const bx=STAGE_W*0.12, by=STAGE_H*0.95; return x>bx-190 && x<bx+190 && y>by-360 && y<by+24; },
+
+  tapFlower(x,y){
+    let best=null,bd=90; for(const f of this.flowers){ const d=Math.hypot(x-f.x,y-(f.y-60)); if(d<bd){bd=d;best=f;} }
+    if(best && best.tapCd<=0){
+      best.tapCd=0.5; best.pop=1; best.wiggle=1; Audio.sparkleVary();
+      const F=FLOWERS[best.type]||{color:'#ffd985'};
+      for(let i=0;i<10;i++){ this.confetti.spawn({ x:best.x+rand(-22,22), y:best.y-60+rand(-24,10), vx:rand(-90,90), vy:rand(-150,-40),
+        g:220, life:rand(0.8,1.6), r:rand(3,6), rot:rand(0,TAU), vr:rand(-8,8), hue: (i%2)?F.color:'#fff2b0' }); }
+      for(let i=0;i<6;i++){ this.pollen.spawn({ x:best.x+rand(-16,16), y:best.y-60, vx:rand(-34,34), vy:rand(-56,-12),
+        g:2, life:rand(1,2), r:rand(2,4), hue:'#fff2b0' }); }
+    }
+  },
+  releaseButterfly(b){
+    b.grabbed=false; b.life=Math.max(b.life,rand(6,12)); b.vx=rand(-50,50); b.vy=rand(-60,-20);
+    Audio.stopDragChime(); Audio.sparkleVary();
+    for(let i=0;i<16;i++) this.confetti.spawn({ x:b.x+rand(-14,14), y:b.y+rand(-14,14), vx:rand(-120,120), vy:rand(-160,-30),
+      g:200, life:rand(0.8,1.6), r:rand(3,6), rot:rand(0,TAU), vr:rand(-8,8), hue:pick(['#fff2b0','#ffd0e8','#bfe6ff', BFLY_TINT[b.type]||'#ffd766']) });
+    for(let i=0;i<8;i++) this.pollen.spawn({ x:b.x+rand(-10,10), y:b.y, vx:rand(-40,40), vy:rand(-60,-10), g:2, life:rand(1,2), r:rand(2,4), hue:'#fff2b0' });
+  },
+  wavePoppu(){
+    if(this.poppuWaveCd>0) return;
+    this.poppuWaveCd=3; this.poppuForceT=Math.max(this.poppuForceT,1.0); this.poppuBounce=1; this.poppuWave=1;
+    Audio.chirp();
+    const bx=STAGE_W*0.12, by=STAGE_H*0.62;
+    for(let i=0;i<14;i++) this.confetti.spawn({ x:bx+rand(-50,50), y:by+rand(-60,40), vx:rand(-120,120), vy:rand(-180,-40),
+      g:220, life:rand(1,1.8), r:rand(3,7), rot:rand(0,TAU), vr:rand(-8,8), hue:pick(['#ff9ecf','#ffe08a','#9ee0b0','#a8c8ff']) });
+  },
+  triggerShake(){
+    Audio.shakeChime();
+    const blooms=this.flowers.filter(f=>f.isBloom());
+    for(const f of blooms){ f.pop=1; for(let i=0;i<4;i++) this.pollen.spawn({ x:f.x+rand(-20,20), y:f.y-60, vx:rand(-60,60), vy:rand(-90,-20), g:2, life:rand(1.2,2.4), r:rand(2,5), hue:'#ffe89a' }); }
+    for(let i=0;i<30;i++) this.pollen.spawn({ x:rand(0,STAGE_W), y:rand(STAGE_H*0.5,STAGE_H*0.9), vx:rand(-50,50), vy:rand(-100,-20), g:2, life:rand(1,2.5), r:rand(2,5), hue:'#fff2b0' });
+    this.shakeWave=1;
+    const cx=STAGE_W/2, cy=STAGE_H*0.6;
+    for(const b of this.butterflies){ if(b.grabbed) continue; const ang=Math.atan2(cy-b.y,cx-b.x); b.vx=lerp(b.vx,Math.cos(ang)*60,0.7); b.vy=lerp(b.vy,Math.sin(ang)*60,0.7); }
+    if(blooms.length){ for(let i=0;i<6;i++){ const s=pick(blooms); this.butterflies.push(new Butterfly(s.x,s.y-50)); } }
+    this.toast('✨ Shake magic!');
+  },
+
+  /* ---------------- parent dashboard ---------------- */
+  openParent(){ this.ui.showParent=true; this.press=null; Audio.chirp(); },
+  parentTap(x,y){
+    // X button or share button hit-tests set in renderParent
+    if(this._parentClose && Math.hypot(x-this._parentClose.x,y-this._parentClose.y)<44){ this.ui.showParent=false; return; }
+    const sb=this._parentShare;
+    if(sb && x>sb.x && x<sb.x+sb.w && y>sb.y && y<sb.y+sb.h){ this.shareReport(); return; }
+    // tap outside the card closes
+    const cp=this._parentCard;
+    if(cp && (x<cp.x||x>cp.x+cp.w||y<cp.y||y>cp.y+cp.h)){ this.ui.showParent=false; }
+  },
+  shareReport(){
+    const name='Your little one';
+    const txt='🌸 '+name+' grew '+Save.data.bloomedTotal+' flowers in Poppu Garden this week!';
+    try{
+      if(navigator.share){ navigator.share({ text:txt }).catch(()=>{}); }
+      else if(navigator.clipboard){ navigator.clipboard.writeText(txt).catch(()=>{}); this.toast('📋 Report copied!'); }
+      else this.toast('🌸 '+Save.data.bloomedTotal+' flowers!');
+    }catch(e){ this.toast('🌸 '+Save.data.bloomedTotal+' flowers!'); }
   },
 };
 
 /* boot */
 window.addEventListener('load', ()=> Game.boot());
+/* PWA service worker — only over http(s) so file:// runs stay error-free */
+if('serviceWorker' in navigator && (location.protocol==='https:'||location.protocol==='http:')){
+  window.addEventListener('load', ()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });
+}
 </script>
 </body>
 </html>
